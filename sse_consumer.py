@@ -1,6 +1,7 @@
 import boto3
 import json
 from sseclient import SSEClient as EventSource
+import utils
 
 # SQS client library
 sqs = boto3.client(
@@ -13,6 +14,8 @@ sqs = boto3.client(
 queue_url = 'http://localhost:4572/123456789012/sse_queue'
 
 def catch_events():
+    '''Listens for updates from the stream and sends them to SQS'''
+
     url = 'https://stream.wikimedia.org/v2/stream/recentchange'
     for event in EventSource(url):
         if event.event == 'message':
@@ -23,7 +26,9 @@ def catch_events():
             else:
                 enqueue_message(json.dumps(message))
 
-def enqueue_message(message):
+def enqueue_message(message: dict):
+    '''Sends the message to SQS'''
+
     response = sqs.send_message(
         QueueUrl=queue_url,
         DelaySeconds=1,
@@ -33,4 +38,5 @@ def enqueue_message(message):
     print(f'\rMessage {response["MessageId"]} enqueued', sep=' ', end='', flush=True)
 
 if __name__ == '__main__':
+    utils.clear_console()
     catch_events()

@@ -2,6 +2,7 @@ import boto3
 import json
 import time
 import pandas as pd
+import utils
 
 # SQS client library
 sqs = boto3.client(
@@ -21,10 +22,12 @@ s3 = boto3.client(
 )
 
 # desired payload
-map_keys = ['id', 'type', 'namespace', 'title', 'comment', 'timesamp', 'user', 'bot', 'ReceiptHandle']
+MAP_KEYS = ['id', 'type', 'namespace', 'title', 'comment', 'timesamp', 'user', 'bot', 'ReceiptHandle']
 list_msgs = []
 
 def read_batch():
+    '''Reads in, processes, and sends to S3 messages from the queue'''
+
     while True:
         try:
             response = sqs.receive_message(
@@ -36,14 +39,21 @@ def read_batch():
             print('\rNo messages available, retrying in 5 seconds...', sep=' ', end='', flush=True)
             time.sleep(5)
 
-def process_batch(messages):
+def process_batch(messages: dict):
+    '''Cleans incoming messages and sends batches to S3
+
+    Only keeps the data in the body of the message under the keys defined by
+    the MAP_KEYS list. Once at least 100 messages have been collected, they
+    are sent to the defined S3 bucket.
+    '''
+
     global list_msgs
     print('\rProcessing messages...', flush=True, end='')
     for message in messages:
         d = json.loads(message['Body'])
 
         # Clean the message body from non-desired data
-        clean_dict = {key:(d[key] if key in d else None) for key in map_keys}
+        clean_dict = {key:(d[key] if key in d else None) for key in MAP_KEYS}
 
         # Enrich df with the message's receipt handle in order to clean it from the queue
         clean_dict['ReceiptHandle'] = message['ReceiptHandle']
@@ -54,7 +64,9 @@ def process_batch(messages):
         to_data_lake(list_msgs)
         list_msgs = list()
 
-def to_data_lake(df):
+def to_data_lake(df: pd.DataFrame):
+    '''Sends a batch of data to the data lake (S3)'''
+
     batch_df = pd.DataFrame(list_msgs)
     csv = batch_df.to_csv(index=False)
     filename = f'batch-{df[0]["id"]}.csv'
@@ -64,7 +76,9 @@ def to_data_lake(df):
     print(f'\r{filename} saved into the Data Lake', sep=' ', end='', flush=True)
     remove_messages(batch_df)
 
-def remove_messages(df):
+def remove_messages(df: pd.DataFrame):
+    '''Removes messages that were processed from the SQS queue
+    '''
     for receipt_handle in df['ReceiptHandle'].values:
         sqs.delete_message(
             QueueUrl=queue_url,
@@ -72,4 +86,5 @@ def remove_messages(df):
         )
     
 if __name__ == '__main__':
+    utils.clear_console()
     read_batch()
